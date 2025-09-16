@@ -1,0 +1,282 @@
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from io import BytesIO
+
+# --- Konfiguracija stranice ---
+st.set_page_config(
+    page_title="Analitički Alat za Izvještaje",
+    page_icon="📊",
+    layout="wide"
+)
+
+# --- Naslov i uvod ---
+st.title("📊 Analitički Alat za Izvještaje o Rezervacijama")
+st.markdown("Učitajte vaš Excel izvještaj kako biste dobili detaljnu analizu i vizualizaciju ključnih poslovnih metrika.")
+
+# --- Funkcija za obradu i konverziju podataka ---
+def process_data(df):
+    """Čisti i priprema DataFrame za analizu."""
+    price_cols = ['Net Price', 'Sale Price', 'Agency Payment', 'Passenger Amount to Pay', 'Agency Amount to Pay', 'Profit']
+    for col in price_cols:
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+    
+    # Popunjavanje praznih vrijednosti u 'Package Type'
+    df['Package Type'].fillna('Grupni polazak', inplace=True)
+    df['Package Type'] = df['Package Type'].replace({'individual': 'Individualni polazak'})
+    
+    # Konverzija datuma
+    df['Create Date'] = pd.to_datetime(df['Create Date'], errors='coerce')
+
+    # Popunjavanje NaN vrijednosti brojem 0 kako ne bi utjecale na proračune
+    df.fillna({
+        'Net Price': 0, 'Sale Price': 0, 'Agency Payment': 0, 'Passenger Amount to Pay': 0, 
+        'Agency Amount to Pay': 0, 'Profit': 0, 'Night': 0, 'Adult': 0, 'Child': 0, 'Infant': 0
+    }, inplace=True)
+    
+    # Kreiranje novih kolona za analizu
+    df['Total Pax'] = df['Adult'] + df['Child'] + df['Infant']
+    
+    return df
+
+# --- Funkcija za generisanje Excel fajla za export ---
+def to_excel(df_filtered, kpi_summary):
+    """Kreira Excel fajl sa više tabova (sheets) za export."""
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df_filtered.to_excel(writer, index=False, sheet_name='Analizirani Podaci')
+        kpi_df = pd.DataFrame(kpi_summary.items(), columns=['Metrika', 'Vrijednost'])
+        kpi_df.to_excel(writer, index=False, sheet_name='Ključne Metrike (KPI)')
+        if not df_filtered.empty:
+            profit_by_city = df_filtered.groupby('Arrival City')['Profit'].sum().sort_values(ascending=False).reset_index()
+            profit_by_city.to_excel(writer, index=False, sheet_name='Profit po Destinaciji')
+            top_hotels = df_filtered['Hotel Name'].value_counts().reset_index()
+            top_hotels.columns = ['Hotel', 'Broj Rezervacija']
+            top_hotels.to_excel(writer, index=False, sheet_name='Najprodavaniji Hoteli')
+            profit_by_package = df_filtered.groupby('Package Type')['Profit'].sum().reset_index()
+            profit_by_package.to_excel(writer, index=False, sheet_name='Profit po Tipu Paketa')
+            profit_by_author = df_filtered.groupby('Author')['Profit'].sum().sort_values(ascending=False).reset_index()
+            profit_by_author.to_excel(writer, index=False, sheet_name='Profit po Autoru')
+    processed_data = output.getvalue()
+    return processed_data
+
+# --- File Uploader ---
+uploaded_file = st.file_uploader("Odaberite Excel dokument (.xlsx ili .xls)", type=["xlsx", "xls"])
+
+if uploaded_file is not None:
+    try:
+        required_columns = [
+            "Reservation No", "Arrival City", "Hotel Name", "Author", "Payment", 
+            "Agency", "Package", "Price List", "Departure City", "Night", "Adult", 
+            "Child", "Infant", "Net Price", "Sale Price", "Agency Payment", 
+            "Create Date", "Passenger Amount to Pay", "Agency Amount to Pay", 
+            "Agency Location", "Package Type", "Profit"
+        ]
+        
+        cleaned_required_columns = [col.strip() for col in required_columns]
+
+        def find_header_row(file, required_cols, max_rows=10):
+            for i in range(max_rows):
+                file.seek(0)
+                try:
+                    temp_df = pd.read_excel(file, nrows=1, header=None, skiprows=i)
+                    if not temp_df.empty and not temp_df.iloc[0].isnull().all():
+                        header_row = temp_df.iloc[0].astype(str).str.strip().tolist()
+                        if all(col.strip() in header_row for col in required_cols):
+                            return i
+                except Exception:
+                    continue
+            return None
+
+        uploaded_file.seek(0)
+        
+        header_row_index = find_header_row(uploaded_file, required_columns)
+
+        if header_row_index is not None:
+            uploaded_file.seek(0)
+            df = pd.read_excel(uploaded_file, header=header_row_index)
+            st.success(f"Fajl uspješno učitan. Zaglavlje pronađeno u redu: {header_row_index + 1}")
+
+            df.columns = df.columns.str.strip()
+            
+            missing_columns = [col for col in cleaned_required_columns if col not in df.columns]
+
+            if missing_columns:
+                st.error(f"Greška: Nakon učitavanja, nedostaju sljedeće kolone:")
+                for col in missing_columns:
+                    st.error(f"- **{col}**")
+                st.warning("Molimo provjerite da li su nazivi kolona u Excelu potpuno identični s onima na listi.")
+            else:
+                st.success("Sve potrebne kolone su pronađene!")
+                
+                df = process_data(df)
+
+                if 'df_state' not in st.session_state:
+                    df['Uključi u analizu'] = (df['Net Price'] > 0) & (df['Sale Price'] > 0)
+                    st.session_state.df_state = df.copy()
+
+                # Definiranje filtera na sidebar-u
+                st.sidebar.header("Filteri za Analizu")
+                
+                all_cities = st.session_state.df_state['Arrival City'].dropna().unique()
+                selected_cities = st.sidebar.multiselect("Destinacija (Arrival City)", options=sorted(all_cities), default=sorted(all_cities))
+                all_hotels = st.session_state.df_state['Hotel Name'].dropna().unique()
+                selected_hotels = st.sidebar.multiselect("Hotel", options=sorted(all_hotels), default=sorted(all_hotels))
+                all_authors = st.session_state.df_state['Author'].dropna().unique()
+                selected_authors = st.sidebar.multiselect("Autor", options=sorted(all_authors), default=sorted(all_authors))
+                all_agencies = st.session_state.df_state['Agency'].dropna().unique()
+                selected_agencies = st.sidebar.multiselect("Agencija", options=sorted(all_agencies), default=sorted(all_agencies))
+                all_package_types = st.session_state.df_state['Package Type'].dropna().unique()
+                selected_package_types = st.sidebar.multiselect("Tip paketa", options=sorted(all_package_types), default=sorted(all_package_types))
+
+                # --- Glavni dio dashboarda ---
+                col1_1, col1_2 = st.columns([0.8, 0.2])
+                with col1_1:
+                    st.header("📈 Analitički Dashboard")
+                with col1_2:
+                    st.markdown("---")
+                    if st.button("🔄 Ažuriraj izvještaj"):
+                        st.session_state.update_triggered = True
+                        st.rerun()
+
+                # Filtriranje podataka na osnovu trenutnog stanja i filtera iz sidebara
+                df_filtered = st.session_state.df_state[st.session_state.df_state['Uključi u analizu']].copy()
+                
+                if selected_cities:
+                    df_filtered = df_filtered[df_filtered['Arrival City'].isin(selected_cities)]
+                if selected_hotels:
+                    df_filtered = df_filtered[df_filtered['Hotel Name'].isin(selected_hotels)]
+                if selected_authors:
+                    df_filtered = df_filtered[df_filtered['Author'].isin(selected_authors)]
+                if selected_agencies:
+                    df_filtered = df_filtered[df_filtered['Agency'].isin(selected_agencies)]
+                if selected_package_types:
+                    df_filtered = df_filtered[df_filtered['Package Type'].isin(selected_package_types)]
+
+                if df_filtered.empty:
+                    st.warning("Nema podataka koji odgovaraju odabranim filterima. Molimo označite rezervacije za analizu.")
+                else:
+                    total_sales = df_filtered['Sale Price'].sum()
+                    total_profit = df_filtered['Profit'].sum()
+                    num_reservations = len(df_filtered)
+                    avg_profit_per_res = total_profit / num_reservations if num_reservations > 0 else 0
+                    kpi_summary = {
+                        "Ukupan prihod": f"{total_sales:,.2f} BAM",
+                        "Ukupan profit": f"{total_profit:,.2f} BAM",
+                        "Broj rezervacija": f"{num_reservations}",
+                        "Prosječan profit po rezervaciji": f"{avg_profit_per_res:,.2f} BAM"
+                    }
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Ukupan Prihod (Sale Price)", f"{total_sales:,.2f} BAM")
+                    col2.metric("Ukupan Profit", f"{total_profit:,.2f} BAM")
+                    col3.metric("Broj Rezervacija", f"{num_reservations}")
+                    col4.metric("Prosječan Profit / Rezervaciji", f"{avg_profit_per_res:,.2f} BAM")
+                    st.markdown("---")
+
+                    # Kreiranje novih grafikona
+                    col_viz1, col_viz2 = st.columns(2)
+                    with col_viz1:
+                        st.subheader("Profitabilnost po Destinaciji")
+                        profit_by_city = df_filtered.groupby('Arrival City')['Profit'].sum().sort_values(ascending=False).reset_index()
+                        fig_city_profit = px.bar(profit_by_city.head(10), x='Arrival City', y='Profit', title="TOP 10 destinacija po profitu", text_auto='.2s', labels={'Arrival City': 'Destinacija', 'Profit': 'Ukupan Profit (BAM)'})
+                        fig_city_profit.update_traces(textposition='outside')
+                        st.plotly_chart(fig_city_profit, use_container_width=True)
+                    with col_viz2:
+                        st.subheader("Najprodavaniji Hoteli (Broj Noćenja)")
+                        nights_by_hotel = df_filtered.groupby('Hotel Name')['Night'].sum().sort_values(ascending=False).reset_index()
+                        fig_nights_hotel = px.bar(nights_by_hotel.head(10), x='Hotel Name', y='Night', title="TOP 10 hotela po broju noćenja", labels={'Hotel Name': 'Naziv Hotela', 'Night': 'Broj Noćenja'})
+                        st.plotly_chart(fig_nights_hotel, use_container_width=True)
+                    
+                    col_viz3, col_viz4 = st.columns(2)
+                    with col_viz3:
+                        st.subheader("Udio profita po tipu paketa")
+                        package_type_profit = df_filtered.groupby('Package Type')['Profit'].sum().reset_index()
+                        fig_package_profit = px.pie(package_type_profit, names='Package Type', values='Profit', title="Udio profita po tipu paketa", hole=0.3)
+                        st.plotly_chart(fig_package_profit, use_container_width=True)
+                    with col_viz4:
+                        st.subheader("Broj rezervacija po broju putnika")
+                        pax_counts = df_filtered['Total Pax'].value_counts().sort_index().reset_index()
+                        pax_counts.columns = ['Total Pax', 'Broj Rezervacija']
+                        fig_pax_dist = px.bar(pax_counts, x='Total Pax', y='Broj Rezervacija', title="Raspodjela rezervacija po broju putnika", labels={'Total Pax': 'Broj Putnika', 'Broj Rezervacija': 'Broj Rezervacija'})
+                        st.plotly_chart(fig_pax_dist, use_container_width=True)
+
+                    col_viz5, col_viz6 = st.columns(2)
+                    with col_viz5:
+                        st.subheader("Analiza po Agenciji")
+                        agency_profit = df_filtered.groupby('Agency')['Profit'].sum().sort_values(ascending=False).reset_index()
+                        fig_agency_profit = px.bar(agency_profit.head(10), x='Agency', y='Profit', title="TOP 10 agencija po profitu", text_auto='.2s', labels={'Agency': 'Agencija', 'Profit': 'Ukupan Profit (BAM)'})
+                        st.plotly_chart(fig_agency_profit, use_container_width=True)
+                    with col_viz6:
+                        st.subheader("Učinak po Autoru")
+                        author_profit = df_filtered.groupby('Author')['Profit'].sum().sort_values(ascending=False).reset_index()
+                        fig_author_profit = px.bar(author_profit.head(10), x='Author', y='Profit', title="TOP 10 autora po ostvarenom profitu", text_auto='.2s', labels={'Author': 'Autor', 'Profit': 'Ukupan Profit (BAM)'})
+                        st.plotly_chart(fig_author_profit, use_container_width=True)
+                    
+                    st.markdown("---")
+                    st.subheader("Detaljan Prikaz Filtriranih Podataka")
+                    st.warning("Odznačite rezervacije koje želite isključiti iz analize i izvještaja.")
+                    
+                    edited_main_df = st.data_editor(
+                        st.session_state.df_state,
+                        key="main_data_editor",
+                        column_order=('Uključi u analizu', 'Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Net Price', 'Sale Price', 'Profit'),
+                        column_config={
+                            "Uključi u analizu": st.column_config.CheckboxColumn("Uključi u analizu"),
+                            "Profit": st.column_config.NumberColumn("Profit (BAM)", format="%.2f"),
+                            "Net Price": st.column_config.NumberColumn("Neto Cijena (BAM)", format="%.2f"),
+                            "Sale Price": st.column_config.NumberColumn("Prodajna Cijena (BAM)", format="%.2f"),
+                            "Reservation No": st.column_config.TextColumn("Broj rezervacije"),
+                            "Arrival City": "Destinacija",
+                            "Hotel Name": "Hotel",
+                            "Author": "Autor",
+                            "Create Date": "Datum kreiranja",
+                        },
+                        disabled=('Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date'),
+                        use_container_width=True
+                    )
+                    
+                    st.session_state.df_state = edited_main_df
+                    
+                    st.markdown("---")
+                    st.subheader("Preuzimanje Analiziranog Izvještaja")
+                    excel_data = to_excel(df_filtered, kpi_summary)
+                    st.download_button(label="📥 Preuzmi Excel fajl", data=excel_data, file_name="analiza_rezervacija.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                
+                # --- Prikaz interaktivne tabele za unos profita ---
+                st.markdown("---")
+                st.subheader("🛠️ Obrada rezervacija bez cijena")
+                st.warning("Pronađene su rezervacije kojima nedostaju podaci o cijeni ili profitu. Unesite vrijednosti i odaberite ih za uključivanje u analizu.")
+                
+                df_without_prices = st.session_state.df_state[(st.session_state.df_state['Net Price'] == 0) | (st.session_state.df_state['Sale Price'] == 0)].copy()
+                
+                if not df_without_prices.empty:
+                    edited_missing_df = st.data_editor(
+                        df_without_prices,
+                        key="missing_prices_editor",
+                        column_order=('Uključi u analizu', 'Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Net Price', 'Sale Price', 'Profit'),
+                        column_config={
+                            "Uključi u analizu": st.column_config.CheckboxColumn("Uključi u analizu", default=False),
+                            "Net Price": st.column_config.NumberColumn("Neto Cijena (BAM)", format="%.2f", min_value=0),
+                            "Sale Price": st.column_config.NumberColumn("Prodajna Cijena (BAM)", format="%.2f", min_value=0),
+                            "Profit": st.column_config.NumberColumn("Profit (BAM)", format="%.2f", min_value=0),
+                            "Reservation No": st.column_config.TextColumn("Broj rezervacije"),
+                            "Arrival City": "Destinacija",
+                            "Hotel Name": "Hotel",
+                            "Author": "Autor",
+                            "Create Date": "Datum kreiranja",
+                        },
+                        disabled=('Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date'),
+                        use_container_width=True
+                    )
+                    
+                    st.session_state.df_state.loc[edited_missing_df.index, 'Uključi u analizu'] = edited_missing_df['Uključi u analizu']
+                    st.session_state.df_state.loc[edited_missing_df.index, 'Net Price'] = edited_missing_df['Net Price']
+                    st.session_state.df_state.loc[edited_missing_df.index, 'Sale Price'] = edited_missing_df['Sale Price']
+                    st.session_state.df_state.loc[edited_missing_df.index, 'Profit'] = edited_missing_df['Profit']
+        else:
+            st.error("Nije moguće pronaći zaglavlje tabele.")
+            st.warning("Molimo provjerite da li vaš Excel fajl sadrži ispravne nazive kolona u prvih 10 redova.")
+
+    except Exception as e:
+        st.error(f"Došlo je do neočekivane greške pri obradi fajla: {e}")
+        st.error("Molimo provjerite da li je fajl ispravan (npr. da nije oštećen ili prazan).")
