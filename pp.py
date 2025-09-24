@@ -3,45 +3,37 @@ import pandas as pd
 import plotly.express as px
 from io import BytesIO
 
-# --- Konfiguracija stranice ---
 st.set_page_config(
     page_title="Analitički Alat za Izvještaje",
     page_icon="📊",
     layout="wide"
 )
 
-# --- Naslov i uvod ---
 st.title("📊 Analitički Alat za Izvještaje o Rezervacijama")
 st.markdown("Učitajte vaš Excel izvještaj kako biste dobili detaljnu analizu i vizualizaciju ključnih poslovnih metrika.")
 
-# --- Funkcija za obradu i konverziju podataka ---
 def process_data(df):
-    """Čisti i priprema DataFrame za analizu."""
     price_cols = ['Net Price', 'Sale Price', 'Agency Payment', 'Passenger Amount to Pay', 'Agency Amount to Pay', 'Profit']
     for col in price_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
-    # Popunjavanje praznih vrijednosti u 'Package Type'
     df['Package Type'].fillna('Grupni polazak', inplace=True)
     df['Package Type'] = df['Package Type'].replace({'individual': 'Individualni polazak'})
     
-    # Konverzija datuma
     df['Create Date'] = pd.to_datetime(df['Create Date'], errors='coerce')
 
-    # Popunjavanje NaN vrijednosti brojem 0 kako ne bi utjecale na proračune
     df.fillna({
         'Net Price': 0, 'Sale Price': 0, 'Agency Payment': 0, 'Passenger Amount to Pay': 0, 
         'Agency Amount to Pay': 0, 'Profit': 0, 'Night': 0, 'Adult': 0, 'Child': 0, 'Infant': 0
     }, inplace=True)
     
-    # Kreiranje novih kolona za analizu
+    df['Profit'] = df['Agency Amount to Pay'] - df['Net Price']
+    
     df['Total Pax'] = df['Adult'] + df['Child'] + df['Infant']
     
     return df
 
-# --- Funkcija za generisanje Excel fajla za export ---
 def to_excel(df_filtered, kpi_summary):
-    """Kreira Excel fajl sa više tabova (sheets) za export."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
         df_filtered.to_excel(writer, index=False, sheet_name='Analizirani Podaci')
@@ -60,7 +52,6 @@ def to_excel(df_filtered, kpi_summary):
     processed_data = output.getvalue()
     return processed_data
 
-# --- File Uploader ---
 uploaded_file = st.file_uploader("Odaberite Excel dokument (.xlsx ili .xls)", type=["xlsx", "xls"])
 
 if uploaded_file is not None:
@@ -115,7 +106,6 @@ if uploaded_file is not None:
                     df['Uključi u analizu'] = (df['Net Price'] > 0) & (df['Sale Price'] > 0)
                     st.session_state.df_state = df.copy()
 
-                # Definiranje filtera na sidebar-u
                 st.sidebar.header("Filteri za Analizu")
                 
                 all_cities = st.session_state.df_state['Arrival City'].dropna().unique()
@@ -129,7 +119,6 @@ if uploaded_file is not None:
                 all_package_types = st.session_state.df_state['Package Type'].dropna().unique()
                 selected_package_types = st.sidebar.multiselect("Tip paketa", options=sorted(all_package_types), default=sorted(all_package_types))
 
-                # --- Glavni dio dashboarda ---
                 col1_1, col1_2 = st.columns([0.8, 0.2])
                 with col1_1:
                     st.header("📈 Analitički Dashboard")
@@ -139,7 +128,6 @@ if uploaded_file is not None:
                         st.session_state.update_triggered = True
                         st.rerun()
 
-                # Filtriranje podataka na osnovu trenutnog stanja i filtera iz sidebara
                 df_filtered = st.session_state.df_state[st.session_state.df_state['Uključi u analizu']].copy()
                 
                 if selected_cities:
@@ -173,7 +161,6 @@ if uploaded_file is not None:
                     col4.metric("Prosječan Profit / Rezervaciji", f"{avg_profit_per_res:,.2f} BAM")
                     st.markdown("---")
 
-                    # Kreiranje novih grafikona
                     col_viz1, col_viz2 = st.columns(2)
                     with col_viz1:
                         st.subheader("Profitabilnost po Destinaciji")
@@ -242,7 +229,6 @@ if uploaded_file is not None:
                     excel_data = to_excel(df_filtered, kpi_summary)
                     st.download_button(label="📥 Preuzmi Excel fajl", data=excel_data, file_name="analiza_rezervacija.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 
-                # --- Prikaz interaktivne tabele za unos profita ---
                 st.markdown("---")
                 st.subheader("🛠️ Obrada rezervacija bez cijena")
                 st.warning("Pronađene su rezervacije kojima nedostaju podaci o cijeni ili profitu. Unesite vrijednosti i odaberite ih za uključivanje u analizu.")
@@ -258,7 +244,7 @@ if uploaded_file is not None:
                             "Uključi u analizu": st.column_config.CheckboxColumn("Uključi u analizu", default=False),
                             "Net Price": st.column_config.NumberColumn("Neto Cijena (BAM)", format="%.2f", min_value=0),
                             "Sale Price": st.column_config.NumberColumn("Prodajna Cijena (BAM)", format="%.2f", min_value=0),
-                            "Profit": st.column_config.NumberColumn("Profit (BAM)", format="%.2f", min_value=0),
+                            "Profit": st.column_config.NumberColumn("Profit (BAM)", format="%.2f"),
                             "Reservation No": st.column_config.TextColumn("Broj rezervacije"),
                             "Arrival City": "Destinacija",
                             "Hotel Name": "Hotel",
