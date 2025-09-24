@@ -100,10 +100,9 @@ if uploaded_file is not None:
             else:
                 st.success("Sve potrebne kolone su pronađene!")
                 
-                df = process_data(df)
-
                 if 'df_state' not in st.session_state:
-                    df['Uključi u analizu'] = (df['Net Price'] > 0) & (df['Sale Price'] > 0)
+                    df = process_data(df)
+                    df['Uključi u analizu'] = (df['Net Price'] > 0) & (df['Agency Amount to Pay'] > 0)
                     st.session_state.df_state = df.copy()
 
                 st.sidebar.header("Filteri za Analizu")
@@ -125,7 +124,6 @@ if uploaded_file is not None:
                 with col1_2:
                     st.markdown("---")
                     if st.button("🔄 Ažuriraj izvještaj"):
-                        st.session_state.update_triggered = True
                         st.rerun()
 
                 df_filtered = st.session_state.df_state[st.session_state.df_state['Uključi u analizu']].copy()
@@ -200,17 +198,18 @@ if uploaded_file is not None:
                         st.plotly_chart(fig_author_profit, use_container_width=True)
                     
                     st.markdown("---")
-                    st.subheader("Detaljan Prikaz Filtriranih Podataka")
-                    st.warning("Odznačite rezervacije koje želite isključiti iz analize i izvještaja.")
+                    st.subheader("Detaljan Prikaz Svih Podataka")
+                    st.warning("Ovdje možete odznačiti rezervacije za analizu ili urediti iznose. Profit se računa automatski.")
                     
                     edited_main_df = st.data_editor(
                         st.session_state.df_state,
                         key="main_data_editor",
-                        column_order=('Uključi u analizu', 'Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Net Price', 'Sale Price', 'Profit'),
+                        column_order=('Uključi u analizu', 'Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Net Price', 'Agency Amount to Pay', 'Sale Price', 'Profit'),
                         column_config={
-                            "Uključi u analizu": st.column_config.CheckboxColumn("Uključi u analizu"),
+                            "Uključi u analizu": st.column_config.CheckboxColumn("Uključi"),
                             "Profit": st.column_config.NumberColumn("Profit (BAM)", format="%.2f"),
                             "Net Price": st.column_config.NumberColumn("Neto Cijena (BAM)", format="%.2f"),
+                            "Agency Amount to Pay": st.column_config.NumberColumn("Agenciji za uplatu (BAM)", format="%.2f"),
                             "Sale Price": st.column_config.NumberColumn("Prodajna Cijena (BAM)", format="%.2f"),
                             "Reservation No": st.column_config.TextColumn("Broj rezervacije"),
                             "Arrival City": "Destinacija",
@@ -218,10 +217,11 @@ if uploaded_file is not None:
                             "Author": "Autor",
                             "Create Date": "Datum kreiranja",
                         },
-                        disabled=('Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date'),
+                        disabled=('Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Profit'),
                         use_container_width=True
                     )
                     
+                    edited_main_df['Profit'] = edited_main_df['Agency Amount to Pay'] - edited_main_df['Net Price']
                     st.session_state.df_state = edited_main_df
                     
                     st.markdown("---")
@@ -231,18 +231,19 @@ if uploaded_file is not None:
                 
                 st.markdown("---")
                 st.subheader("🛠️ Obrada rezervacija bez cijena")
-                st.warning("Pronađene su rezervacije kojima nedostaju podaci o cijeni ili profitu. Unesite vrijednosti i odaberite ih za uključivanje u analizu.")
+                st.warning("Pronađene su rezervacije kojima nedostaju podaci o cijeni. Unesite vrijednosti i odaberite ih za uključivanje u analizu.")
                 
-                df_without_prices = st.session_state.df_state[(st.session_state.df_state['Net Price'] == 0) | (st.session_state.df_state['Sale Price'] == 0)].copy()
+                df_without_prices = st.session_state.df_state[(st.session_state.df_state['Net Price'] == 0) | (st.session_state.df_state['Agency Amount to Pay'] == 0)].copy()
                 
                 if not df_without_prices.empty:
                     edited_missing_df = st.data_editor(
                         df_without_prices,
                         key="missing_prices_editor",
-                        column_order=('Uključi u analizu', 'Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Net Price', 'Sale Price', 'Profit'),
+                        column_order=('Uključi u analizu', 'Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Net Price', 'Agency Amount to Pay', 'Sale Price', 'Profit'),
                         column_config={
-                            "Uključi u analizu": st.column_config.CheckboxColumn("Uključi u analizu", default=False),
+                            "Uključi u analizu": st.column_config.CheckboxColumn("Uključi", default=False),
                             "Net Price": st.column_config.NumberColumn("Neto Cijena (BAM)", format="%.2f", min_value=0),
+                            "Agency Amount to Pay": st.column_config.NumberColumn("Agenciji za uplatu (BAM)", format="%.2f", min_value=0),
                             "Sale Price": st.column_config.NumberColumn("Prodajna Cijena (BAM)", format="%.2f", min_value=0),
                             "Profit": st.column_config.NumberColumn("Profit (BAM)", format="%.2f"),
                             "Reservation No": st.column_config.TextColumn("Broj rezervacije"),
@@ -251,14 +252,13 @@ if uploaded_file is not None:
                             "Author": "Autor",
                             "Create Date": "Datum kreiranja",
                         },
-                        disabled=('Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date'),
+                        disabled=('Reservation No', 'Arrival City', 'Hotel Name', 'Author', 'Create Date', 'Profit'),
                         use_container_width=True
                     )
                     
-                    st.session_state.df_state.loc[edited_missing_df.index, 'Uključi u analizu'] = edited_missing_df['Uključi u analizu']
-                    st.session_state.df_state.loc[edited_missing_df.index, 'Net Price'] = edited_missing_df['Net Price']
-                    st.session_state.df_state.loc[edited_missing_df.index, 'Sale Price'] = edited_missing_df['Sale Price']
-                    st.session_state.df_state.loc[edited_missing_df.index, 'Profit'] = edited_missing_df['Profit']
+                    edited_missing_df['Profit'] = edited_missing_df['Agency Amount to Pay'] - edited_missing_df['Net Price']
+                    st.session_state.df_state.update(edited_missing_df)
+
         else:
             st.error("Nije moguće pronaći zaglavlje tabele.")
             st.warning("Molimo provjerite da li vaš Excel fajl sadrži ispravne nazive kolona u prvih 10 redova.")
