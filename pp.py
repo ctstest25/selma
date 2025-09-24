@@ -19,7 +19,10 @@ def process_data(df):
     
     date_cols = ['Create Date', 'Begin Date', 'End Date']
     for col in date_cols:
-        df[col] = pd.to_datetime(df[col], errors='coerce')
+        if col == 'Create Date':
+            df[col] = pd.to_datetime(df[col], errors='coerce')
+        else:
+            df[col] = pd.to_datetime(df[col], format='%d/%m/%Y', errors='coerce')
 
     df['Package Type'].fillna('Grupni polazak', inplace=True)
     df['Package Type'] = df['Package Type'].replace({'individual': 'Individualni polazak'})
@@ -156,6 +159,8 @@ if uploaded_file is not None:
                     df_filtered = df_filtered[df_filtered['Agency'].isin(selected_agencies)]
                 if selected_package_types:
                     df_filtered = df_filtered[df_filtered['Package Type'].isin(selected_package_types)]
+                
+                # Dodati uslov za filtriranje po datumu, ali izvan bloka za iscrtavanje
                 if start_date and end_date:
                     start_date_ts = pd.to_datetime(start_date)
                     end_date_ts = pd.to_datetime(end_date)
@@ -182,11 +187,15 @@ if uploaded_file is not None:
                     st.markdown("---")
 
                     st.subheader("Trend Profitabilnosti Tokom Vremena")
-                    profit_over_time = df_filtered.set_index('Begin Date').groupby(pd.Grouper(freq='M'))['Profit'].sum().reset_index()
-                    profit_over_time['Month'] = profit_over_time['Begin Date'].dt.strftime('%Y-%m')
-                    fig_profit_trend = px.line(profit_over_time, x='Month', y='Profit', title="Mjesečni profit", labels={'Month': 'Mjesec', 'Profit': 'Ukupan Profit (BAM)'}, markers=True)
-                    fig_profit_trend.update_layout(xaxis_title="Mjesec", yaxis_title="Ukupan Profit (BAM)")
-                    st.plotly_chart(fig_profit_trend, use_container_width=True)
+                    if not df_filtered['Begin Date'].dropna().empty:
+                        profit_over_time = df_filtered.set_index('Begin Date').groupby(pd.Grouper(freq='M'))['Profit'].sum().reset_index()
+                        profit_over_time['Month'] = profit_over_time['Begin Date'].dt.strftime('%Y-%m')
+                        fig_profit_trend = px.line(profit_over_time, x='Month', y='Profit', title="Mjesečni profit", labels={'Month': 'Mjesec', 'Profit': 'Ukupan Profit (BAM)'}, markers=True)
+                        fig_profit_trend.update_layout(xaxis_title="Mjesec", yaxis_title="Ukupan Profit (BAM)")
+                        st.plotly_chart(fig_profit_trend, use_container_width=True)
+                    else:
+                        st.warning("Nedostaju podaci o datumu putovanja za prikaz ovog trenda.")
+
                     st.markdown("---")
 
 
