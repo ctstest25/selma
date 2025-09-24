@@ -17,10 +17,12 @@ def process_data(df):
     for col in price_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
     
+    date_cols = ['Create Date', 'Begin Date', 'End Date']
+    for col in date_cols:
+        df[col] = pd.to_datetime(df[col], errors='coerce')
+
     df['Package Type'].fillna('Grupni polazak', inplace=True)
     df['Package Type'] = df['Package Type'].replace({'individual': 'Individualni polazak'})
-    
-    df['Create Date'] = pd.to_datetime(df['Create Date'], errors='coerce')
 
     df.fillna({
         'Net Price': 0, 'Sale Price': 0, 'Agency Payment': 0, 'Passenger Amount to Pay': 0, 
@@ -58,10 +60,10 @@ if uploaded_file is not None:
     try:
         required_columns = [
             "Reservation No", "Arrival City", "Hotel Name", "Author", "Payment", 
-            "Agency", "Package", "Price List", "Departure City", "Night", "Adult", 
+            "Agency", "Begin Date", "Package", "Price List", "End Date", "Night", "Adult", 
             "Child", "Infant", "Net Price", "Sale Price", "Agency Payment", 
             "Create Date", "Passenger Amount to Pay", "Agency Amount to Pay", 
-            "Agency Location", "Package Type", "Profit"
+            "Package Type", "Profit"
         ]
         
         cleaned_required_columns = [col.strip() for col in required_columns]
@@ -118,9 +120,25 @@ if uploaded_file is not None:
                 all_package_types = st.session_state.df_state['Package Type'].dropna().unique()
                 selected_package_types = st.sidebar.multiselect("Tip paketa", options=sorted(all_package_types), default=sorted(all_package_types))
 
+                st.sidebar.markdown("---")
+                st.sidebar.header("Filter po Datumu Putovanja")
+
+                start_date, end_date = None, None
+                if not st.session_state.df_state['Begin Date'].dropna().empty:
+                    min_date = st.session_state.df_state['Begin Date'].dropna().min().date()
+                    max_date = st.session_state.df_state['Begin Date'].dropna().max().date()
+                    start_date = st.sidebar.date_input("Početni datum", min_date, min_value=min_date, max_value=max_date)
+                    end_date = st.sidebar.date_input("Krajnji datum", max_date, min_value=min_date, max_value=max_date)
+                else:
+                    st.sidebar.warning("Nedostaju datumi putovanja za filtriranje.")
+
+
                 col1_1, col1_2 = st.columns([0.8, 0.2])
                 with col1_1:
                     st.header("📈 Analitički Dashboard")
+                    if start_date and end_date:
+                        st.subheader(f"Prikaz za period: {start_date.strftime('%d.%m.%Y.')} - {end_date.strftime('%d.%m.%Y.')}")
+
                 with col1_2:
                     st.markdown("---")
                     if st.button("🔄 Ažuriraj izvještaj"):
@@ -138,6 +156,10 @@ if uploaded_file is not None:
                     df_filtered = df_filtered[df_filtered['Agency'].isin(selected_agencies)]
                 if selected_package_types:
                     df_filtered = df_filtered[df_filtered['Package Type'].isin(selected_package_types)]
+                if start_date and end_date:
+                    start_date_ts = pd.to_datetime(start_date)
+                    end_date_ts = pd.to_datetime(end_date)
+                    df_filtered = df_filtered[(df_filtered['Begin Date'] >= start_date_ts) & (df_filtered['Begin Date'] <= end_date_ts)]
 
                 if df_filtered.empty:
                     st.warning("Nema podataka koji odgovaraju odabranim filterima. Molimo označite rezervacije za analizu.")
@@ -158,6 +180,15 @@ if uploaded_file is not None:
                     col3.metric("Broj Rezervacija", f"{num_reservations}")
                     col4.metric("Prosječan Profit / Rezervaciji", f"{avg_profit_per_res:,.2f} BAM")
                     st.markdown("---")
+
+                    st.subheader("Trend Profitabilnosti Tokom Vremena")
+                    profit_over_time = df_filtered.set_index('Begin Date').groupby(pd.Grouper(freq='M'))['Profit'].sum().reset_index()
+                    profit_over_time['Month'] = profit_over_time['Begin Date'].dt.strftime('%Y-%m')
+                    fig_profit_trend = px.line(profit_over_time, x='Month', y='Profit', title="Mjesečni profit", labels={'Month': 'Mjesec', 'Profit': 'Ukupan Profit (BAM)'}, markers=True)
+                    fig_profit_trend.update_layout(xaxis_title="Mjesec", yaxis_title="Ukupan Profit (BAM)")
+                    st.plotly_chart(fig_profit_trend, use_container_width=True)
+                    st.markdown("---")
+
 
                     col_viz1, col_viz2 = st.columns(2)
                     with col_viz1:
