@@ -54,6 +54,9 @@ def to_excel(df_filtered, kpi_summary):
             profit_by_package.to_excel(writer, index=False, sheet_name='Profit po Tipu Paketa')
             profit_by_author = df_filtered.groupby('Author')['Profit'].sum().sort_values(ascending=False).reset_index()
             profit_by_author.to_excel(writer, index=False, sheet_name='Profit po Autoru')
+            # NOVA FUNKCIONALNOST: Promet (Agency Amount to Pay) po Autoru za Excel
+            traffic_by_author = df_filtered.groupby('Author')['Agency Amount to Pay'].sum().sort_values(ascending=False).reset_index()
+            traffic_by_author.to_excel(writer, index=False, sheet_name='Promet po Autoru')
     processed_data = output.getvalue()
     return processed_data
 
@@ -171,19 +174,25 @@ if uploaded_file is not None:
                 else:
                     total_sales = df_filtered['Sale Price'].sum()
                     total_profit = df_filtered['Profit'].sum()
+                    total_agency_amount = df_filtered['Agency Amount to Pay'].sum() # NOVA METRIKA
                     num_reservations = len(df_filtered)
                     avg_profit_per_res = total_profit / num_reservations if num_reservations > 0 else 0
+                    
+                    # Ažuriran kpi_summary sa novom metrikom
                     kpi_summary = {
                         "Ukupan prihod": f"{total_sales:,.2f} BAM",
                         "Ukupan profit": f"{total_profit:,.2f} BAM",
+                        "Ukupan promet (Agency Amount to Pay)": f"{total_agency_amount:,.2f} BAM", # NOVA METRIKA
                         "Broj rezervacija": f"{num_reservations}",
                         "Prosječan profit po rezervaciji": f"{avg_profit_per_res:,.2f} BAM"
                     }
-                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    col1, col2, col3, col4, col5 = st.columns(5) # Povećan broj kolona
                     col1.metric("Ukupan Prihod (Sale Price)", f"{total_sales:,.2f} BAM")
                     col2.metric("Ukupan Profit", f"{total_profit:,.2f} BAM")
-                    col3.metric("Broj Rezervacija", f"{num_reservations}")
-                    col4.metric("Prosječan Profit / Rezervaciji", f"{avg_profit_per_res:,.2f} BAM")
+                    col3.metric("Ukupan Promet (Agency Amount to Pay)", f"{total_agency_amount:,.2f} BAM") # NOVI KPI
+                    col4.metric("Broj Rezervacija", f"{num_reservations}")
+                    col5.metric("Prosječan Profit / Rezervaciji", f"{avg_profit_per_res:,.2f} BAM")
                     st.markdown("---")
 
                     st.subheader("Trend Profitabilnosti Tokom Vremena")
@@ -232,11 +241,18 @@ if uploaded_file is not None:
                         fig_agency_profit = px.bar(agency_profit.head(10), x='Agency', y='Profit', title="TOP 10 agencija po profitu", text_auto='.2s', labels={'Agency': 'Agencija', 'Profit': 'Ukupan Profit (BAM)'})
                         st.plotly_chart(fig_agency_profit, use_container_width=True)
                     with col_viz6:
-                        st.subheader("Učinak po Autoru")
+                        # NOVO: Grafikon za Promet (Agency Amount to Pay) po Autoru
+                        st.subheader("TOP Autori (Po Ostvarenom Prometu)")
+                        author_traffic = df_filtered.groupby('Author')['Agency Amount to Pay'].sum().sort_values(ascending=False).reset_index() # NOVA METRIKA
+                        fig_author_traffic = px.bar(author_traffic.head(10), x='Author', y='Agency Amount to Pay', title="TOP 10 autora po ostvarenom prometu", text_auto='.2s', labels={'Author': 'Autor', 'Agency Amount to Pay': 'Ukupan Promet (BAM)'})
+                        st.plotly_chart(fig_author_traffic, use_container_width=True)
+                        
+                        # POSTOJEĆI: Grafikon za Profit po Autoru
+                        st.subheader("Učinak po Autoru (Profit)")
                         author_profit = df_filtered.groupby('Author')['Profit'].sum().sort_values(ascending=False).reset_index()
                         fig_author_profit = px.bar(author_profit.head(10), x='Author', y='Profit', title="TOP 10 autora po ostvarenom profitu", text_auto='.2s', labels={'Author': 'Autor', 'Profit': 'Ukupan Profit (BAM)'})
                         st.plotly_chart(fig_author_profit, use_container_width=True)
-                    
+                        
                     st.markdown("---")
                     st.subheader("Detaljan Prikaz Svih Podataka")
                     st.warning("Ovdje možete odznačiti rezervacije za analizu ili urediti iznose. Profit se računa automatski.")
