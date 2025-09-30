@@ -54,9 +54,18 @@ def to_excel(df_filtered, kpi_summary):
             profit_by_package.to_excel(writer, index=False, sheet_name='Profit po Tipu Paketa')
             profit_by_author = df_filtered.groupby('Author')['Profit'].sum().sort_values(ascending=False).reset_index()
             profit_by_author.to_excel(writer, index=False, sheet_name='Profit po Autoru')
-            # NOVA FUNKCIONALNOST: Promet (Agency Amount to Pay) po Autoru za Excel
             traffic_by_author = df_filtered.groupby('Author')['Agency Amount to Pay'].sum().sort_values(ascending=False).reset_index()
             traffic_by_author.to_excel(writer, index=False, sheet_name='Promet po Autoru')
+            
+            # NOVO: Broj prodaja po Agenciji i top destinacije
+            sales_by_agency = df_filtered['Agency'].value_counts().reset_index()
+            sales_by_agency.columns = ['Agency', 'Broj Rezervacija']
+            sales_by_agency.to_excel(writer, index=False, sheet_name='Broj Rezervacija po Agenciji')
+
+            top_cities_by_agency = df_filtered.groupby(['Agency', 'Arrival City']).size().reset_index(name='Broj Rezervacija')
+            top_cities_by_agency = top_cities_by_agency.sort_values(['Agency', 'Broj Rezervacija'], ascending=[True, False])
+            top_cities_by_agency.to_excel(writer, index=False, sheet_name='Top Destinacije po Agenciji')
+
     processed_data = output.getvalue()
     return processed_data
 
@@ -126,24 +135,43 @@ if uploaded_file is not None:
                 all_package_types = st.session_state.df_state['Package Type'].dropna().unique()
                 selected_package_types = st.sidebar.multiselect("Tip paketa", options=sorted(all_package_types), default=sorted(all_package_types))
 
+                # --- FILTERI ZA DATUM ---
+
+                # Filter po Datumu Kreiranja (NOVI)
+                st.sidebar.markdown("---")
+                st.sidebar.header("Filter po Datumu Kreiranja")
+                start_date_create, end_date_create = None, None
+                if not st.session_state.df_state['Create Date'].dropna().empty:
+                    min_date_create = st.session_state.df_state['Create Date'].dropna().min().date()
+                    max_date_create = st.session_state.df_state['Create Date'].dropna().max().date()
+                    start_date_create = st.sidebar.date_input("Početni datum kreiranja", min_date_create, min_value=min_date_create, max_value=max_date_create, key="create_start")
+                    end_date_create = st.sidebar.date_input("Krajnji datum kreiranja", max_date_create, min_value=min_date_create, max_value=max_date_create, key="create_end")
+                else:
+                    st.sidebar.warning("Nedostaju datumi kreiranja za filtriranje.")
+
+
+                # Filter po Datumu Putovanja (POSTOJEĆI)
                 st.sidebar.markdown("---")
                 st.sidebar.header("Filter po Datumu Putovanja")
-
-                start_date, end_date = None, None
+                start_date_travel, end_date_travel = None, None
                 if not st.session_state.df_state['Begin Date'].dropna().empty:
-                    min_date = st.session_state.df_state['Begin Date'].dropna().min().date()
-                    max_date = st.session_state.df_state['Begin Date'].dropna().max().date()
-                    start_date = st.sidebar.date_input("Početni datum", min_date, min_value=min_date, max_value=max_date)
-                    end_date = st.sidebar.date_input("Krajnji datum", max_date, min_value=min_date, max_value=max_date)
+                    min_date_travel = st.session_state.df_state['Begin Date'].dropna().min().date()
+                    max_date_travel = st.session_state.df_state['Begin Date'].dropna().max().date()
+                    start_date_travel = st.sidebar.date_input("Početni datum putovanja", min_date_travel, min_value=min_date_travel, max_value=max_date_travel, key="travel_start")
+                    end_date_travel = st.sidebar.date_input("Krajnji datum putovanja", max_date_travel, min_value=min_date_travel, max_value=max_date_travel, key="travel_end")
                 else:
                     st.sidebar.warning("Nedostaju datumi putovanja za filtriranje.")
+
+                # --- KRAJ FILTERA ZA DATUM ---
 
 
                 col1_1, col1_2 = st.columns([0.8, 0.2])
                 with col1_1:
                     st.header("📈 Analitički Dashboard")
-                    if start_date and end_date:
-                        st.subheader(f"Prikaz za period: {start_date.strftime('%d.%m.%Y.')} - {end_date.strftime('%d.%m.%Y.')}")
+                    if start_date_create and end_date_create and start_date_travel and end_date_travel:
+                        st.subheader(f"Datumi kreiranja: {start_date_create.strftime('%d.%m.%Y.')} - {end_date_create.strftime('%d.%m.%Y.')}")
+                        st.subheader(f"Datumi putovanja: {start_date_travel.strftime('%d.%m.%Y.')} - {end_date_travel.strftime('%d.%m.%Y.')}")
+
 
                 with col1_2:
                     st.markdown("---")
@@ -152,6 +180,7 @@ if uploaded_file is not None:
 
                 df_filtered = st.session_state.df_state[st.session_state.df_state['Uključi u analizu']].copy()
                 
+                # Filtriranje po destinacijama, hotelima, autorima, agencijama, tipu paketa
                 if selected_cities:
                     df_filtered = df_filtered[df_filtered['Arrival City'].isin(selected_cities)]
                 if selected_hotels:
@@ -163,34 +192,40 @@ if uploaded_file is not None:
                 if selected_package_types:
                     df_filtered = df_filtered[df_filtered['Package Type'].isin(selected_package_types)]
                 
-                # Dodati uslov za filtriranje po datumu, ali izvan bloka za iscrtavanje
-                if start_date and end_date:
-                    start_date_ts = pd.to_datetime(start_date)
-                    end_date_ts = pd.to_datetime(end_date)
-                    df_filtered = df_filtered[(df_filtered['Begin Date'] >= start_date_ts) & (df_filtered['Begin Date'] <= end_date_ts)]
+                # Filtriranje po Datumu Putovanja (Begin Date)
+                if start_date_travel and end_date_travel:
+                    start_date_ts_travel = pd.to_datetime(start_date_travel)
+                    end_date_ts_travel = pd.to_datetime(end_date_travel)
+                    df_filtered = df_filtered[(df_filtered['Begin Date'] >= start_date_ts_travel) & (df_filtered['Begin Date'] <= end_date_ts_travel)]
+
+                # Filtriranje po Datumu Kreiranja (Create Date)
+                if start_date_create and end_date_create:
+                    start_date_ts_create = pd.to_datetime(start_date_create)
+                    end_date_ts_create = pd.to_datetime(end_date_create)
+                    df_filtered = df_filtered[(df_filtered['Create Date'] >= start_date_ts_create) & (df_filtered['Create Date'] <= end_date_ts_create)]
+
 
                 if df_filtered.empty:
                     st.warning("Nema podataka koji odgovaraju odabranim filterima. Molimo označite rezervacije za analizu.")
                 else:
                     total_sales = df_filtered['Sale Price'].sum()
                     total_profit = df_filtered['Profit'].sum()
-                    total_agency_amount = df_filtered['Agency Amount to Pay'].sum() # NOVA METRIKA
+                    total_agency_amount = df_filtered['Agency Amount to Pay'].sum()
                     num_reservations = len(df_filtered)
                     avg_profit_per_res = total_profit / num_reservations if num_reservations > 0 else 0
                     
-                    # Ažuriran kpi_summary sa novom metrikom
                     kpi_summary = {
                         "Ukupan prihod": f"{total_sales:,.2f} BAM",
                         "Ukupan profit": f"{total_profit:,.2f} BAM",
-                        "Ukupan promet (Agency Amount to Pay)": f"{total_agency_amount:,.2f} BAM", # NOVA METRIKA
+                        "Ukupan promet (Agency Amount to Pay)": f"{total_agency_amount:,.2f} BAM",
                         "Broj rezervacija": f"{num_reservations}",
                         "Prosječan profit po rezervaciji": f"{avg_profit_per_res:,.2f} BAM"
                     }
                     
-                    col1, col2, col3, col4, col5 = st.columns(5) # Povećan broj kolona
+                    col1, col2, col3, col4, col5 = st.columns(5)
                     col1.metric("Ukupan Prihod (Sale Price)", f"{total_sales:,.2f} BAM")
                     col2.metric("Ukupan Profit", f"{total_profit:,.2f} BAM")
-                    col3.metric("Ukupan Promet (Agency Amount to Pay)", f"{total_agency_amount:,.2f} BAM") # NOVI KPI
+                    col3.metric("Ukupan Promet (Agency Amount to Pay)", f"{total_agency_amount:,.2f} BAM")
                     col4.metric("Broj Rezervacija", f"{num_reservations}")
                     col5.metric("Prosječan Profit / Rezervaciji", f"{avg_profit_per_res:,.2f} BAM")
                     st.markdown("---")
@@ -199,7 +234,7 @@ if uploaded_file is not None:
                     if not df_filtered['Begin Date'].dropna().empty:
                         profit_over_time = df_filtered.set_index('Begin Date').groupby(pd.Grouper(freq='M'))['Profit'].sum().reset_index()
                         profit_over_time['Month'] = profit_over_time['Begin Date'].dt.strftime('%Y-%m')
-                        fig_profit_trend = px.line(profit_over_time, x='Month', y='Profit', title="Mjesečni profit", labels={'Month': 'Mjesec', 'Profit': 'Ukupan Profit (BAM)'}, markers=True)
+                        fig_profit_trend = px.line(profit_over_time, x='Month', y='Profit', title="Mjesečni profit (Po datumu putovanja)", labels={'Month': 'Mjesec', 'Profit': 'Ukupan Profit (BAM)'}, markers=True)
                         fig_profit_trend.update_layout(xaxis_title="Mjesec", yaxis_title="Ukupan Profit (BAM)")
                         st.plotly_chart(fig_profit_trend, use_container_width=True)
                     else:
@@ -234,24 +269,60 @@ if uploaded_file is not None:
                         fig_pax_dist = px.bar(pax_counts, x='Total Pax', y='Broj Rezervacija', title="Raspodjela rezervacija po broju putnika", labels={'Total Pax': 'Broj Putnika', 'Broj Rezervacija': 'Broj Rezervacija'})
                         st.plotly_chart(fig_pax_dist, use_container_width=True)
 
+                    st.markdown("---")
+                    st.subheader("Analitika Agencija i Autora")
+
                     col_viz5, col_viz6 = st.columns(2)
                     with col_viz5:
-                        st.subheader("Analiza po Agenciji")
+                        st.subheader("Broj Rezervacija po Agenciji") # NOVI GRAFIKON
+                        agency_sales = df_filtered['Agency'].value_counts().reset_index()
+                        agency_sales.columns = ['Agency', 'Broj Rezervacija']
+                        fig_agency_sales = px.bar(agency_sales.head(10), x='Agency', y='Broj Rezervacija', title="TOP 10 agencija po broju rezervacija", text_auto=True, labels={'Agency': 'Agencija', 'Broj Rezervacija': 'Broj Rezervacija'})
+                        st.plotly_chart(fig_agency_sales, use_container_width=True)
+
+                        st.subheader("Profit po Agenciji")
                         agency_profit = df_filtered.groupby('Agency')['Profit'].sum().sort_values(ascending=False).reset_index()
                         fig_agency_profit = px.bar(agency_profit.head(10), x='Agency', y='Profit', title="TOP 10 agencija po profitu", text_auto='.2s', labels={'Agency': 'Agencija', 'Profit': 'Ukupan Profit (BAM)'})
                         st.plotly_chart(fig_agency_profit, use_container_width=True)
                     with col_viz6:
-                        # NOVO: Grafikon za Promet (Agency Amount to Pay) po Autoru
                         st.subheader("TOP Autori (Po Ostvarenom Prometu)")
-                        author_traffic = df_filtered.groupby('Author')['Agency Amount to Pay'].sum().sort_values(ascending=False).reset_index() # NOVA METRIKA
+                        author_traffic = df_filtered.groupby('Author')['Agency Amount to Pay'].sum().sort_values(ascending=False).reset_index()
                         fig_author_traffic = px.bar(author_traffic.head(10), x='Author', y='Agency Amount to Pay', title="TOP 10 autora po ostvarenom prometu", text_auto='.2s', labels={'Author': 'Autor', 'Agency Amount to Pay': 'Ukupan Promet (BAM)'})
                         st.plotly_chart(fig_author_traffic, use_container_width=True)
                         
-                        # POSTOJEĆI: Grafikon za Profit po Autoru
                         st.subheader("Učinak po Autoru (Profit)")
                         author_profit = df_filtered.groupby('Author')['Profit'].sum().sort_values(ascending=False).reset_index()
                         fig_author_profit = px.bar(author_profit.head(10), x='Author', y='Profit', title="TOP 10 autora po ostvarenom profitu", text_auto='.2s', labels={'Author': 'Autor', 'Profit': 'Ukupan Profit (BAM)'})
                         st.plotly_chart(fig_author_profit, use_container_width=True)
+
+                    # NOVO: Tabela sa najprodavanijim lokacijama po agenciji
+                    st.markdown("---")
+                    st.subheader("🌍 Najprodavanije Lokacije (Destinacije) po Agenciji")
+                    
+                    if not df_filtered.empty:
+                        # Grupiranje i brojanje rezervacija po Agenciji i Destinaciji
+                        agency_city_sales = df_filtered.groupby(['Agency', 'Arrival City']).size().reset_index(name='Broj Rezervacija')
+                        
+                        # Pronađi Top 3 destinacije za svaku agenciju
+                        def get_top_cities(group):
+                            return group.sort_values(by='Broj Rezervacija', ascending=False).head(3)
+
+                        top_cities_by_agency = agency_city_sales.groupby('Agency').apply(get_top_cities).reset_index(drop=True)
+                        
+                        top_cities_by_agency.rename(columns={'Arrival City': 'Destinacija'}, inplace=True)
+                        
+                        st.dataframe(
+                            top_cities_by_agency, 
+                            use_container_width=True,
+                            column_order=('Agency', 'Destinacija', 'Broj Rezervacija'),
+                            column_config={
+                                "Agency": "Agencija",
+                                "Destinacija": "Top Destinacija",
+                                "Broj Rezervacija": st.column_config.NumberColumn("Broj Rezervacija", format="%d")
+                            }
+                        )
+                    else:
+                        st.info("Nema podataka o rezervacijama da bi se analizirale destinacije po agencijama.")
                         
                     st.markdown("---")
                     st.subheader("Detaljan Prikaz Svih Podataka")
